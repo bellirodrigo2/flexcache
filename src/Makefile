@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Werror -g -I..
 
 # Source files
-TEST_SRCS = tests/test_main.c tests/test_bcache.c tests/test_flexcache_core.c
+TEST_SRCS = tests/test_main.c tests/test_bcache.c tests/test_flexcache_core.c tests/test_flexcache_ttl.c
 LIB_SRCS = flexcache.c
 
 # Object files
@@ -31,3 +31,4 @@ clean:
 tests/test_main.o: tests/test_main.c
 tests/test_bcache.o: tests/test_bcache.c tests/test_helpers.h bcache.h
 tests/test_flexcache_core.o: tests/test_flexcache_core.c tests/test_helpers.h flexcache.h
+tests/test_flexcache_ttl.o: tests/test_flexcache_ttl.c tests/test_helpers.h flexcache.h

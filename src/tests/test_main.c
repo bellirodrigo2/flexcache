@@ -3,7 +3,7 @@
 /* Test runners */
 extern int run_bcache_tests(void);
 extern int run_flexcache_core_tests(void);
-/* extern int run_flexcache_ttl_tests(void); */
+extern int run_flexcache_ttl_tests(void);
 /* extern int run_flexcache_eviction_tests(void); */
 
 int
@@ -17,7 +17,7 @@ main(void)
 
     failed += run_bcache_tests();
     failed += run_flexcache_core_tests();
-    /* failed += run_flexcache_ttl_tests(); */
+    failed += run_flexcache_ttl_tests();
     /* failed += run_flexcache_eviction_tests(); */
 
     printf("\n========================================\n");
