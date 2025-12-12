@@ -279,6 +279,8 @@ flexcache_insert(
     if (!fc || !key || key_len == 0 || byte_size < 0)
         return -2;
 
+    flexcache_maybe_scan_and_clean(fc);
+
     now_ms = fc->now_fn(fc->user_ctx);
 
     k = fc->key_copy ? fc->key_copy(key, key_len, fc->user_ctx)
@@ -352,6 +354,8 @@ flexcache_get(flexcache *fc, const void *key, size_t key_len)
 
     if (!fc || !key || key_len == 0)
         return NULL;
+
+    flexcache_maybe_scan_and_clean(fc);
 
     n = bcache_get(&fc->base, (void *)key, key_len);
     if (!n)

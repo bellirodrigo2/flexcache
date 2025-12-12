@@ -690,3 +690,74 @@ class TestStress:
         
         assert cache.items <= 50
         assert cache.bytes <= 5000
+# tests/test_main.py
+
+def test_lazy_scan_on_get():
+    """Lazy scan removes all expired items on get, not just the accessed one."""
+    cache = FlexCache(
+        eviction_policy='lru',
+        scan_interval=0.0,  # scan every time
+    )
+    
+    cache.set("k1", "v1", ttl=timedelta(milliseconds=50))
+    cache.set("k2", "v2", ttl=timedelta(milliseconds=50))
+    cache.set("k3", "v3")  # no expiration
+    
+    assert cache.items == 3
+    
+    time.sleep(0.1)
+    
+    # Access k3 - should trigger lazy scan and remove k1, k2
+    cache.get("k3")
+    
+    assert cache.items == 1
+    assert cache.get("k3") == "v3"
+
+
+def test_lazy_scan_on_set():
+    """Lazy scan removes expired items on set."""
+    cache = FlexCache(
+        eviction_policy='lru',
+        scan_interval=0.0,
+    )
+    
+    cache.set("k1", "v1", ttl=timedelta(milliseconds=50))
+    cache.set("k2", "v2", ttl=timedelta(milliseconds=50))
+    
+    assert cache.items == 2
+    
+    time.sleep(0.1)
+    
+    # Insert new item - should trigger lazy scan first
+    cache.set("k3", "v3")
+    
+    assert cache.items == 1
+    assert cache.get("k3") == "v3"
+
+
+def test_scan_interval_respected():
+    """Scan interval limits how often lazy scan runs."""
+    cache = FlexCache(
+        eviction_policy='lru',
+        scan_interval=1.0,  # scan at most once per second
+    )
+    
+    cache.set("k1", "v1", ttl=timedelta(milliseconds=50))
+    
+    time.sleep(0.1)
+    
+    # First get triggers scan (last_scan was 0)
+    assert cache.get("k1") is None
+    
+    # Add more expiring items
+    cache.set("k2", "v2", ttl=timedelta(milliseconds=50))
+    cache.set("k3", "v3", ttl=timedelta(milliseconds=50))
+    
+    time.sleep(0.1)
+    
+    # Get k2 - but scan won't run (interval not passed)
+    # k2 itself will be removed by the individual expiry check
+    assert cache.get("k2") is None
+    
+    # k3 should still be there (lazy scan didn't run)
+    assert cache.items == 1
