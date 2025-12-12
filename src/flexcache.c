@@ -2,8 +2,6 @@
 
 #include <stdlib.h>
 #include <limits.h>
-
-
 /* ============================================================
  *  Internal helpers
  * ============================================================ */
@@ -53,35 +51,17 @@ static void
 remove_expired(flexcache *fc, uint64_t now_ms)
 {
     bcache_node *n;
-    bcache_node *next;
-    bcache_node *head;
+    bcache_node *tmp;
     flexcache_entry *e;
-    int is_last;
 
-    head = fc->base.list;
-    if (!head)
-        return;
-
-    n = head;
-    do {
-        /* Check if this is the last element (circular: next points to head) */
-        is_last = (n->next == head) || (fc->base.item_count == 1);
-        next = n->next;
-
+    /* Iterate safely using hash iteration instead of list */
+    /* This avoids circular list issues when removing multiple nodes */
+    HASH_ITER(hh, fc->base.hashmap, n, tmp) {
         e = (flexcache_entry *)n->value;
         if (e && e->expires_at_ms && e->expires_at_ms <= now_ms) {
             delete_node(fc, n);
-            /* After deletion, list head may have changed */
-            head = fc->base.list;
-            if (!head)
-                return;
         }
-
-        if (is_last)
-            break;
-
-        n = next;
-    } while (n != head);
+    }
 }
 
 /**
@@ -285,7 +265,8 @@ flexcache_insert(
     const void *value,
     size_t value_len,
     int64_t byte_size,
-    uint64_t ttl_ms
+    uint64_t ttl_ms,
+    uint64_t expires_at_ms
 )
 {
     uint64_t now_ms;
@@ -322,8 +303,20 @@ flexcache_insert(
         return -2;
     }
 
-    e->user_value    = v;
-    e->expires_at_ms = safe_expiration(now_ms, ttl_ms);
+    e->user_value = v;
+    
+    /* Calculate expiration:
+     * - If ttl_ms > 0: relative TTL from now
+     * - Else if expires_at_ms > 0: absolute timestamp
+     * - Else: no expiration (0)
+     */
+    if (ttl_ms > 0) {
+        e->expires_at_ms = safe_expiration(now_ms, ttl_ms);
+    } else if (expires_at_ms > 0) {
+        e->expires_at_ms = expires_at_ms;
+    } else {
+        e->expires_at_ms = 0;
+    }
 
     n = bcache_node_new(k, key_len, e, byte_size);
     if (!n) {
@@ -337,7 +330,6 @@ flexcache_insert(
 
     rc = bcache_insert(&fc->base, n);
     if (rc != 0) {
-        /* bcache_insert failed (duplicate key) - clean up */
         uthash_free(n, sizeof(*n));
         free(e);
         if (fc->key_free)
@@ -367,6 +359,7 @@ flexcache_get(flexcache *fc, const void *key, size_t key_len)
 
     e = (flexcache_entry *)n->value;
     now_ms = fc->now_fn(fc->user_ctx);
+
 
     if (e && e->expires_at_ms && e->expires_at_ms <= now_ms) {
         delete_node(fc, n);

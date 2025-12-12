@@ -10,14 +10,13 @@ version = "0.1.0"
 description = "Fast in-memory cache with TTL and pluggable eviction policies"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = "MIT"  # formato novo SPDX
 authors = [
     {name = "RodBell"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: C",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",

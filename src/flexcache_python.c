@@ -94,8 +94,8 @@ py_ondelete(void *key, size_t key_len, void *value, int64_t byte_size, void *use
 static int64_t
 py_get_byte_size(PyObject *obj)
 {
-    if (PyObject_HasAttrString(obj, "byteSize")) {
-        PyObject *result = PyObject_CallMethod(obj, "byteSize", NULL);
+    if (PyObject_HasAttrString(obj, "item_size")) {
+        PyObject *result = PyObject_CallMethod(obj, "item_size", NULL);
         if (result) {
             int64_t size = PyLong_AsLongLong(result);
             Py_DECREF(result);
@@ -225,18 +225,35 @@ PyFlexCache_set(PyFlexCache *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
     
+    if (key_len == 0) {
+        PyErr_SetString(PyExc_ValueError, "Key cannot be empty");
+        return NULL;
+    }
+    
     uint64_t ttl_ms = 0;
+    uint64_t expires_at_ms = 0;
     
     if (ttl_obj != Py_None) {
         if (PyDelta_Check(ttl_obj)) {
+            /* timedelta = relative TTL */
             PyObject *total_sec = PyObject_CallMethod(ttl_obj, "total_seconds", NULL);
             if (!total_sec) return NULL;
             double sec = PyFloat_AsDouble(total_sec);
             Py_DECREF(total_sec);
             if (PyErr_Occurred()) return NULL;
-            ttl_ms = (uint64_t)(sec * 1000.0);
+            
+            if (sec > 0) {
+                ttl_ms = (uint64_t)(sec * 1000.0);
+            }
+            /* sec <= 0 means no expiration (ttl_ms stays 0) */
         }
         else if (PyDateTime_Check(ttl_obj)) {
+            /* datetime = absolute expiration */
+            /* Convert Python datetime to our internal timestamp */
+            
+            /* Get current times in both systems */
+            uint64_t internal_now = py_now_ms(NULL);
+            
             PyObject *datetime_mod = PyImport_ImportModule("datetime");
             if (!datetime_mod) return NULL;
             
@@ -244,12 +261,13 @@ PyFlexCache_set(PyFlexCache *self, PyObject *args, PyObject *kwds)
             Py_DECREF(datetime_mod);
             if (!datetime_cls) return NULL;
             
-            PyObject *now = PyObject_CallMethod(datetime_cls, "now", NULL);
+            PyObject *py_now = PyObject_CallMethod(datetime_cls, "now", NULL);
             Py_DECREF(datetime_cls);
-            if (!now) return NULL;
+            if (!py_now) return NULL;
             
-            PyObject *delta = PyNumber_Subtract(ttl_obj, now);
-            Py_DECREF(now);
+            /* Calculate delta from Python's now to target datetime */
+            PyObject *delta = PyNumber_Subtract(ttl_obj, py_now);
+            Py_DECREF(py_now);
             if (!delta) return NULL;
             
             PyObject *total_sec = PyObject_CallMethod(delta, "total_seconds", NULL);
@@ -260,8 +278,16 @@ PyFlexCache_set(PyFlexCache *self, PyObject *args, PyObject *kwds)
             Py_DECREF(total_sec);
             if (PyErr_Occurred()) return NULL;
             
-            if (sec > 0) {
-                ttl_ms = (uint64_t)(sec * 1000.0);
+            /* Convert to absolute internal timestamp */
+            /* expires_at = internal_now + delta_ms */
+            int64_t delta_ms = (int64_t)(sec * 1000.0);
+            
+            if (delta_ms <= 0) {
+                /* Datetime in past or now = already expired */
+                /* Set to 1 so it's less than any future now_ms */
+                expires_at_ms = 1;
+            } else {
+                expires_at_ms = internal_now + (uint64_t)delta_ms;
             }
         }
         else {
@@ -277,7 +303,8 @@ PyFlexCache_set(PyFlexCache *self, PyObject *args, PyObject *kwds)
         key, (size_t)key_len,
         value, 0,
         byte_size,
-        ttl_ms
+        ttl_ms,
+        expires_at_ms
     );
     
     if (rc == -1) {
@@ -354,7 +381,48 @@ PyFlexCache_scan(PyFlexCache *self, PyObject *Py_UNUSED(args))
 static PyObject *
 PyFlexCache_clear(PyFlexCache *self, PyObject *Py_UNUSED(args))
 {
-    flexcache_destroy(&self->cache);
+    bcache_node *n;
+    bcache_node *next;
+    bcache_node *head;
+
+    head = self->cache.base.list;
+    if (!head) {
+        Py_RETURN_NONE;
+    }
+
+    /* Iterate and delete all nodes properly */
+    while (self->cache.base.list) {
+        n = self->cache.base.list;
+        
+        /* Call ondelete and free callbacks */
+        void *key = n->key;
+        void *value = ((flexcache_entry *)n->value)->user_value;
+        
+        /* Call close() if exists */
+        if (value && PyObject_HasAttrString((PyObject *)value, "close")) {
+            PyObject *result = PyObject_CallMethod((PyObject *)value, "close", NULL);
+            if (result) {
+                Py_DECREF(result);
+            } else {
+                PyErr_Clear();
+            }
+        }
+        
+        /* Decref value */
+        if (value) {
+            Py_DECREF((PyObject *)value);
+        }
+        
+        /* Free entry struct */
+        free(n->value);
+        
+        /* Free key */
+        free(key);
+        
+        /* Remove from bcache */
+        bcache_remove_node(&self->cache.base, n);
+    }
+    
     Py_RETURN_NONE;
 }
 

@@ -1,11 +1,7 @@
 # flexcache/__init__.pyi
 
 from datetime import datetime, timedelta
-from typing import Any, Literal, Protocol, overload
-
-class CacheEntry(Protocol):
-    def byteSize(self) -> int: ...
-    def close(self) -> None: ...
+from typing import Any, Literal
 
 class FlexCache:
     def __init__(

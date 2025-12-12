@@ -245,6 +245,7 @@ void flexcache_free(flexcache *fc);
  * @param value_len  Value size in bytes (for copy callback).
  * @param byte_size  Accounted size for eviction limits.
  * @param ttl_ms     Time-to-live in milliseconds (0 = no expiration).
+ * @param expires_at_ms Absolute expiration timestamp (0 = no expiration, ignored if ttl_ms > 0).
  *
  * @return 0 on success, -1 on duplicate key, -2 on allocation error.
  */
@@ -255,7 +256,8 @@ int flexcache_insert(
     const void *value,
     size_t value_len,
     int64_t byte_size,
-    uint64_t ttl_ms
+    uint64_t ttl_ms,
+    uint64_t expires_at_ms
 );
 
 /**
