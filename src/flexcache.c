@@ -213,40 +213,49 @@ flexcache_set_policy_hooks(
     fc->policy_ctx = policy_ctx;
 }
 
+// void
+// flexcache_destroy(flexcache *fc)
+// {
+//     bcache_node *n;
+//     bcache_node *next;
+//     bcache_node *head;
+//     int is_last;
+
+//     if (!fc)
+//         return;
+
+//     head = fc->base.list;
+//     if (!head)
+//         return;
+
+//     n = head;
+//     do {
+//         is_last = (n->next == head) || (fc->base.item_count == 1);
+//         next = n->next;
+
+//         delete_node(fc, n);
+
+//         /* Update head after deletion */
+//         head = fc->base.list;
+//         if (!head)
+//             return;
+
+//         if (is_last)
+//             break;
+
+//         n = next;
+//     } while (n != head);
+// }
 void
 flexcache_destroy(flexcache *fc)
 {
-    bcache_node *n;
-    bcache_node *next;
-    bcache_node *head;
-    int is_last;
-
     if (!fc)
         return;
 
-    head = fc->base.list;
-    if (!head)
-        return;
-
-    n = head;
-    do {
-        is_last = (n->next == head) || (fc->base.item_count == 1);
-        next = n->next;
-
-        delete_node(fc, n);
-
-        /* Update head after deletion */
-        head = fc->base.list;
-        if (!head)
-            return;
-
-        if (is_last)
-            break;
-
-        n = next;
-    } while (n != head);
+    while (fc->base.list) {
+        delete_node(fc, fc->base.list);
+    }
 }
-
 void
 flexcache_free(flexcache *fc)
 {

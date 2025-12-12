@@ -2,14 +2,14 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Werror -g -I..
 
 # Source files
-TEST_SRCS = tests/test_main.c tests/test_bcache.c
+TEST_SRCS = tests/test_main.c tests/test_bcache.c tests/test_flexcache_core.c
 LIB_SRCS = flexcache.c
 
 # Object files
 TEST_OBJS = $(TEST_SRCS:.c=.o)
 
 # Output
-TARGET = run_tests
+TARGET = tests/run_tests
 
 .PHONY: all test clean
 
@@ -25,8 +25,9 @@ test: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -f $(TEST_OBJS) $(TARGET)
+	rm -f tests/*.o $(TARGET)
 
 # Dependencies
-test_bcache.o: tests/test_bcache.c tests/test_helpers.h bcache.h
-test_main.o: tests/test_main.c
+tests/test_main.o: tests/test_main.c
+tests/test_bcache.o: tests/test_bcache.c tests/test_helpers.h bcache.h
+tests/test_flexcache_core.o: tests/test_flexcache_core.c tests/test_helpers.h flexcache.h

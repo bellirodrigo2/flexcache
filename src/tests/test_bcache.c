@@ -1,5 +1,5 @@
 #include "test_helpers.h"
-#include "../src/bcache.h"
+#include "../bcache.h"
 
 /* ============================================================
  *  Test: Initialization
