@@ -92,7 +92,7 @@ py_ondelete(void *key, size_t key_len, void *value, int64_t byte_size, void *use
 }
 
 static int64_t
-py_get_byte_size(PyObject *obj)
+py_get_item_size(PyObject *obj)
 {
     if (PyObject_HasAttrString(obj, "item_size")) {
         PyObject *result = PyObject_CallMethod(obj, "item_size", NULL);
@@ -153,15 +153,15 @@ PyFlexCache_dealloc(PyFlexCache *self)
 static int
 PyFlexCache_init(PyFlexCache *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"eviction_policy", "scan_interval", "max_items", "max_bytes", NULL};
+    static char *kwlist[] = {"eviction_policy", "scan_interval", "max_items", "max_size", NULL};
     
     const char *policy_str = "lru";
     double scan_interval_sec = 0.0;
     Py_ssize_t max_items = 0;
-    Py_ssize_t max_bytes = 0;
+    Py_ssize_t max_size = 0;
     
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "|sdnn", kwlist,
-            &policy_str, &scan_interval_sec, &max_items, &max_bytes)) {
+            &policy_str, &scan_interval_sec, &max_items, &max_size)) {
         return -1;
     }
     
@@ -171,7 +171,7 @@ PyFlexCache_init(PyFlexCache *self, PyObject *args, PyObject *kwds)
         &self->cache,
         py_now_ms,
         (size_t)max_items,
-        (int64_t)max_bytes,
+        (int64_t)max_size,
         scan_interval_ms,
         py_key_copy,
         py_key_free,
@@ -296,7 +296,7 @@ PyFlexCache_set(PyFlexCache *self, PyObject *args, PyObject *kwds)
         }
     }
     
-    int64_t byte_size = py_get_byte_size(value);
+    int64_t byte_size = py_get_item_size(value);
     
     int rc = flexcache_insert(
         &self->cache,
@@ -365,7 +365,7 @@ PyFlexCache_get_items(PyFlexCache *self, void *closure)
 }
 
 static PyObject *
-PyFlexCache_get_bytes(PyFlexCache *self, void *closure)
+PyFlexCache_get_size(PyFlexCache *self, void *closure)
 {
     (void)closure;
     return PyLong_FromLongLong(flexcache_total_bytes(&self->cache));
@@ -441,7 +441,7 @@ static PyMethodDef PyFlexCache_methods[] = {
 
 static PyGetSetDef PyFlexCache_getsetters[] = {
     {"items", (getter)PyFlexCache_get_items, NULL, "Number of items", NULL},
-    {"bytes", (getter)PyFlexCache_get_bytes, NULL, "Total bytes", NULL},
+    {"size", (getter)PyFlexCache_get_size, NULL, "Total size", NULL},
     {NULL}
 };
 

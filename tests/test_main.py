@@ -18,7 +18,7 @@ def cache_lru():
         eviction_policy='lru',
         scan_interval=0.0,
         max_items=5,
-        max_bytes=0
+        max_size=0
     )
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def cache_fifo():
         eviction_policy='fifo',
         scan_interval=0.0,
         max_items=5,
-        max_bytes=0
+        max_size=0
     )
 
 @pytest.fixture
@@ -38,17 +38,17 @@ def cache_random():
         eviction_policy='random',
         scan_interval=0.0,
         max_items=5,
-        max_bytes=0
+        max_size=0
     )
 
 @pytest.fixture
-def cache_bytes_limit():
+def cache_size_limit():
     """Cache with byte limit."""
     return FlexCache(
         eviction_policy='lru',
         scan_interval=0.0,
         max_items=0,
-        max_bytes=100
+        max_size=100
     )
 
 @pytest.fixture
@@ -58,7 +58,7 @@ def cache_no_limits():
         eviction_policy='lru',
         scan_interval=0.0,
         max_items=0,
-        max_bytes=0
+        max_size=0
     )
 
 
@@ -204,7 +204,7 @@ class TestValueTypes:
 
 
 # ============================================================
-#  Statistics (items / bytes)
+#  Statistics (items / size)
 # ============================================================
 
 class TestStatistics:
@@ -218,25 +218,25 @@ class TestStatistics:
         cache_no_limits.delete("k1")
         assert cache_no_limits.items == 1
     
-    def test_bytes_default_is_one(self, cache_no_limits):
+    def test_size_default_is_one(self, cache_no_limits):
         """Objects without item_size() should count as 1 byte."""
         cache_no_limits.set("k1", "value")
         cache_no_limits.set("k2", 12345)
-        assert cache_no_limits.bytes == 2
+        assert cache_no_limits.size == 2
     
-    def test_bytes_with_item_size(self, cache_no_limits):
-        entry1 = SizedEntry(b"hello")  # 5 bytes
-        entry2 = SizedEntry(b"world!!!")  # 8 bytes
+    def test_size_with_item_size(self, cache_no_limits):
+        entry1 = SizedEntry(b"hello")  # 5 size
+        entry2 = SizedEntry(b"world!!!")  # 8 size
         cache_no_limits.set("k1", entry1)
         cache_no_limits.set("k2", entry2)
-        assert cache_no_limits.bytes == 13
+        assert cache_no_limits.size == 13
     
-    def test_bytes_decreases_on_delete(self, cache_no_limits):
-        entry = SizedEntry(b"0123456789")  # 10 bytes
+    def test_size_decreases_on_delete(self, cache_no_limits):
+        entry = SizedEntry(b"0123456789")  # 10 size
         cache_no_limits.set("k", entry)
-        assert cache_no_limits.bytes == 10
+        assert cache_no_limits.size == 10
         cache_no_limits.delete("k")
-        assert cache_no_limits.bytes == 0
+        assert cache_no_limits.size == 0
 
 
 # ============================================================
@@ -415,34 +415,34 @@ class TestRandomEviction:
 
 class TestByteEviction:
     
-    def test_evicts_when_over_byte_limit(self, cache_bytes_limit):
-        # max_bytes = 100
-        entry1 = SizedEntry(b"x" * 50)  # 50 bytes
-        entry2 = SizedEntry(b"x" * 50)  # 50 bytes
+    def test_evicts_when_over_byte_limit(self, cache_size_limit):
+        # max_size = 100
+        entry1 = SizedEntry(b"x" * 50)  # 50 size
+        entry2 = SizedEntry(b"x" * 50)  # 50 size
         
-        cache_bytes_limit.set("k1", entry1)
-        cache_bytes_limit.set("k2", entry2)
+        cache_size_limit.set("k1", entry1)
+        cache_size_limit.set("k2", entry2)
         
-        assert cache_bytes_limit.bytes == 100
+        assert cache_size_limit.size == 100
         
-        # Add 60 more bytes, should evict k1
+        # Add 60 more size, should evict k1
         entry3 = SizedEntry(b"x" * 60)
-        cache_bytes_limit.set("k3", entry3)
+        cache_size_limit.set("k3", entry3)
         
-        assert cache_bytes_limit.bytes <= 100
-        assert cache_bytes_limit.get("k1") is None
+        assert cache_size_limit.size <= 100
+        assert cache_size_limit.get("k1") is None
     
-    def test_large_item_evicts_multiple(self, cache_bytes_limit):
-        # Insert 10 items of 10 bytes each
+    def test_large_item_evicts_multiple(self, cache_size_limit):
+        # Insert 10 items of 10 size each
         for i in range(10):
-            cache_bytes_limit.set(f"k{i}", SizedEntry(b"x" * 10))
+            cache_size_limit.set(f"k{i}", SizedEntry(b"x" * 10))
         
-        assert cache_bytes_limit.bytes == 100
+        assert cache_size_limit.size == 100
         
         # Insert 80 byte item - should evict multiple
-        cache_bytes_limit.set("big", SizedEntry(b"x" * 80))
+        cache_size_limit.set("big", SizedEntry(b"x" * 80))
         
-        assert cache_bytes_limit.bytes <= 100
+        assert cache_size_limit.size <= 100
 
 
 # ============================================================
@@ -452,18 +452,18 @@ class TestByteEviction:
 class TestItemSizeProtocol:
     
     def test_item_size_is_called(self, cache_no_limits):
-        entry = SizedEntry(b"hello world")  # 11 bytes
+        entry = SizedEntry(b"hello world")  # 11 size
         cache_no_limits.set("k", entry)
-        assert cache_no_limits.bytes == 11
+        assert cache_no_limits.size == 11
     
     def test_item_size_zero(self, cache_no_limits):
-        entry = SizedEntry(b"")  # 0 bytes
+        entry = SizedEntry(b"")  # 0 size
         cache_no_limits.set("k", entry)
-        assert cache_no_limits.bytes == 0
+        assert cache_no_limits.size == 0
     
     def test_without_item_size_defaults_to_one(self, cache_no_limits):
         cache_no_limits.set("k", PlainObject("test"))
-        assert cache_no_limits.bytes == 1
+        assert cache_no_limits.size == 1
 
 
 # ============================================================
@@ -555,10 +555,10 @@ class TestEdgeCases:
             cache_no_limits.set(f"k{i}", f"v{i}")
         assert cache_no_limits.items == 100
     
-    def test_max_bytes_zero_means_unlimited(self, cache_no_limits):
+    def test_max_size_zero_means_unlimited(self, cache_no_limits):
         for i in range(100):
             cache_no_limits.set(f"k{i}", SizedEntry(b"x" * 1000))
-        assert cache_no_limits.bytes == 100000
+        assert cache_no_limits.size == 100000
     
     def test_ttl_zero_means_no_expiration(self, cache_no_limits):
         cache_no_limits.set("k", "v", ttl=timedelta(seconds=0))
@@ -676,7 +676,7 @@ class TestStress:
         cache = FlexCache(
             eviction_policy='lru',
             max_items=50,
-            max_bytes=5000
+            max_size=5000
         )
         
         for i in range(500):
@@ -689,7 +689,7 @@ class TestStress:
                 cache.delete(f"k{max(0, i - 10)}")
         
         assert cache.items <= 50
-        assert cache.bytes <= 5000
+        assert cache.size <= 5000
 # tests/test_main.py
 
 def test_lazy_scan_on_get():

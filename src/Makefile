@@ -1,5 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -g -I..
+CFLAGS = -Wall -Wextra -Werror -g -Og -I..
+CFLAGS += -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wundef
 
 # Source files
 TEST_SRCS = tests/test_main.c tests/test_bcache.c tests/test_flexcache_core.c tests/test_flexcache_ttl.c
