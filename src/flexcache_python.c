@@ -135,6 +135,218 @@ py_rng(void *rng_ctx)
 }
 
 /* ============================================================
+ *  TTL conversion helpers
+ * ============================================================ */
+
+/* Result structure for TTL parsing */
+typedef struct {
+    uint64_t ttl_ms;        /* Relative TTL in milliseconds (0 = no TTL) */
+    uint64_t expires_at_ms; /* Absolute expiration timestamp (0 = use ttl_ms) */
+    int error;              /* 0 = success, -1 = error (PyErr already set) */
+} ttl_result_t;
+
+/* Convert seconds (float) to milliseconds */
+static uint64_t
+seconds_to_ms(double seconds)
+{
+    if (seconds <= 0.0) {
+        return 0;
+    }
+    return (uint64_t)(seconds * 1000.0);
+}
+
+/* Parse timedelta object to relative TTL in milliseconds */
+static ttl_result_t
+parse_timedelta_ttl(PyObject *td_obj)
+{
+    ttl_result_t result = {0, 0, 0};
+    
+    PyObject *total_sec = PyObject_CallMethod(td_obj, "total_seconds", NULL);
+    if (!total_sec) {
+        result.error = -1;
+        return result;
+    }
+    
+    double sec = PyFloat_AsDouble(total_sec);
+    Py_DECREF(total_sec);
+    
+    if (PyErr_Occurred()) {
+        result.error = -1;
+        return result;
+    }
+    
+    result.ttl_ms = seconds_to_ms(sec);
+    return result;
+}
+
+/* Parse datetime object to absolute expiration timestamp */
+static ttl_result_t
+parse_datetime_ttl(PyObject *dt_obj)
+{
+    ttl_result_t result = {0, 0, 0};
+    
+    uint64_t internal_now = py_now_ms(NULL);
+    
+    PyObject *datetime_mod = PyImport_ImportModule("datetime");
+    if (!datetime_mod) {
+        result.error = -1;
+        return result;
+    }
+    
+    PyObject *datetime_cls = PyObject_GetAttrString(datetime_mod, "datetime");
+    Py_DECREF(datetime_mod);
+    if (!datetime_cls) {
+        result.error = -1;
+        return result;
+    }
+    
+    PyObject *py_now = PyObject_CallMethod(datetime_cls, "now", NULL);
+    Py_DECREF(datetime_cls);
+    if (!py_now) {
+        result.error = -1;
+        return result;
+    }
+    
+    PyObject *delta = PyNumber_Subtract(dt_obj, py_now);
+    Py_DECREF(py_now);
+    if (!delta) {
+        result.error = -1;
+        return result;
+    }
+    
+    PyObject *total_sec = PyObject_CallMethod(delta, "total_seconds", NULL);
+    Py_DECREF(delta);
+    if (!total_sec) {
+        result.error = -1;
+        return result;
+    }
+    
+    double sec = PyFloat_AsDouble(total_sec);
+    Py_DECREF(total_sec);
+    
+    if (PyErr_Occurred()) {
+        result.error = -1;
+        return result;
+    }
+    
+    int64_t delta_ms = (int64_t)(sec * 1000.0);
+    
+    if (delta_ms <= 0) {
+        /* Datetime in past or now = already expired */
+        result.expires_at_ms = 1;
+    } else {
+        result.expires_at_ms = internal_now + (uint64_t)delta_ms;
+    }
+    
+    return result;
+}
+
+/*
+ * Parse TTL from Python object.
+ * Accepts:
+ *   - None: no expiration
+ *   - float/int: seconds (relative TTL)
+ *   - timedelta: relative TTL
+ *   - datetime: absolute expiration
+ */
+static ttl_result_t
+parse_ttl(PyObject *ttl_obj)
+{
+    ttl_result_t result = {0, 0, 0};
+    
+    if (ttl_obj == Py_None) {
+        return result;
+    }
+    
+    /* Check for numeric types first (float/int = seconds) */
+    if (PyFloat_Check(ttl_obj) || PyLong_Check(ttl_obj)) {
+        double sec = PyFloat_AsDouble(ttl_obj);
+        if (PyErr_Occurred()) {
+            result.error = -1;
+            return result;
+        }
+        result.ttl_ms = seconds_to_ms(sec);
+        return result;
+    }
+    
+    /* timedelta = relative TTL */
+    if (PyDelta_Check(ttl_obj)) {
+        return parse_timedelta_ttl(ttl_obj);
+    }
+    
+    /* datetime = absolute expiration */
+    if (PyDateTime_Check(ttl_obj)) {
+        return parse_datetime_ttl(ttl_obj);
+    }
+    
+    PyErr_SetString(PyExc_TypeError, 
+        "ttl must be None, float (seconds), timedelta, or datetime");
+    result.error = -1;
+    return result;
+}
+
+/* ============================================================
+ *  Policy initialization helpers
+ * ============================================================ */
+
+typedef enum {
+    POLICY_LRU = 0,
+    POLICY_FIFO = 1,
+    POLICY_RANDOM = 2,
+    POLICY_INVALID = -1
+} policy_type_t;
+
+static policy_type_t
+parse_policy_name(const char *policy_str)
+{
+    if (strcmp(policy_str, "lru") == 0) {
+        return POLICY_LRU;
+    }
+    if (strcmp(policy_str, "fifo") == 0) {
+        return POLICY_FIFO;
+    }
+    if (strcmp(policy_str, "random") == 0) {
+        return POLICY_RANDOM;
+    }
+    return POLICY_INVALID;
+}
+
+/*
+ * Initialize eviction policy on cache.
+ * Returns 0 on success, -1 on error (PyErr set).
+ */
+static int
+init_eviction_policy(PyFlexCache *self, policy_type_t policy)
+{
+    self->policy_type = (int)policy;
+    self->random_policy = NULL;
+    
+    switch (policy) {
+        case POLICY_LRU:
+            flexcache_policy_lru_init(&self->cache);
+            return 0;
+            
+        case POLICY_FIFO:
+            flexcache_policy_fifo_init(&self->cache);
+            return 0;
+            
+        case POLICY_RANDOM:
+            self->random_policy = flexcache_policy_random_create(py_rng, NULL);
+            if (!self->random_policy) {
+                PyErr_SetString(PyExc_RuntimeError, "Failed to create random policy");
+                return -1;
+            }
+            flexcache_policy_random_init(&self->cache, self->random_policy);
+            return 0;
+            
+        default:
+            PyErr_SetString(PyExc_ValueError, 
+                "eviction_policy must be 'lru', 'fifo', or 'random'");
+            return -1;
+    }
+}
+
+/* ============================================================
  *  Type methods
  * ============================================================ */
 
@@ -165,7 +377,16 @@ PyFlexCache_init(PyFlexCache *self, PyObject *args, PyObject *kwds)
         return -1;
     }
     
-    uint64_t scan_interval_ms = (uint64_t)(scan_interval_sec * 1000.0);
+    /* Parse and validate policy */
+    policy_type_t policy = parse_policy_name(policy_str);
+    if (policy == POLICY_INVALID) {
+        PyErr_SetString(PyExc_ValueError, 
+            "eviction_policy must be 'lru', 'fifo', or 'random'");
+        return -1;
+    }
+    
+    /* Initialize cache */
+    uint64_t scan_interval_ms = seconds_to_ms(scan_interval_sec);
     
     int rc = flexcache_init(
         &self->cache,
@@ -186,24 +407,9 @@ PyFlexCache_init(PyFlexCache *self, PyObject *args, PyObject *kwds)
         return -1;
     }
     
-    self->random_policy = NULL;
-    
-    if (strcmp(policy_str, "lru") == 0) {
-        self->policy_type = 0;
-        flexcache_policy_lru_init(&self->cache);
-    } else if (strcmp(policy_str, "fifo") == 0) {
-        self->policy_type = 1;
-        flexcache_policy_fifo_init(&self->cache);
-    } else if (strcmp(policy_str, "random") == 0) {
-        self->policy_type = 2;
-        self->random_policy = flexcache_policy_random_create(py_rng, NULL);
-        if (!self->random_policy) {
-            PyErr_SetString(PyExc_RuntimeError, "Failed to create random policy");
-            return -1;
-        }
-        flexcache_policy_random_init(&self->cache, self->random_policy);
-    } else {
-        PyErr_SetString(PyExc_ValueError, "eviction_policy must be 'lru', 'fifo', or 'random'");
+    /* Initialize eviction policy */
+    if (init_eviction_policy(self, policy) != 0) {
+        flexcache_destroy(&self->cache);
         return -1;
     }
     
@@ -230,70 +436,10 @@ PyFlexCache_set(PyFlexCache *self, PyObject *args, PyObject *kwds)
         return NULL;
     }
     
-    uint64_t ttl_ms = 0;
-    uint64_t expires_at_ms = 0;
-    
-    if (ttl_obj != Py_None) {
-        if (PyDelta_Check(ttl_obj)) {
-            /* timedelta = relative TTL */
-            PyObject *total_sec = PyObject_CallMethod(ttl_obj, "total_seconds", NULL);
-            if (!total_sec) return NULL;
-            double sec = PyFloat_AsDouble(total_sec);
-            Py_DECREF(total_sec);
-            if (PyErr_Occurred()) return NULL;
-            
-            if (sec > 0) {
-                ttl_ms = (uint64_t)(sec * 1000.0);
-            }
-            /* sec <= 0 means no expiration (ttl_ms stays 0) */
-        }
-        else if (PyDateTime_Check(ttl_obj)) {
-            /* datetime = absolute expiration */
-            /* Convert Python datetime to our internal timestamp */
-            
-            /* Get current times in both systems */
-            uint64_t internal_now = py_now_ms(NULL);
-            
-            PyObject *datetime_mod = PyImport_ImportModule("datetime");
-            if (!datetime_mod) return NULL;
-            
-            PyObject *datetime_cls = PyObject_GetAttrString(datetime_mod, "datetime");
-            Py_DECREF(datetime_mod);
-            if (!datetime_cls) return NULL;
-            
-            PyObject *py_now = PyObject_CallMethod(datetime_cls, "now", NULL);
-            Py_DECREF(datetime_cls);
-            if (!py_now) return NULL;
-            
-            /* Calculate delta from Python's now to target datetime */
-            PyObject *delta = PyNumber_Subtract(ttl_obj, py_now);
-            Py_DECREF(py_now);
-            if (!delta) return NULL;
-            
-            PyObject *total_sec = PyObject_CallMethod(delta, "total_seconds", NULL);
-            Py_DECREF(delta);
-            if (!total_sec) return NULL;
-            
-            double sec = PyFloat_AsDouble(total_sec);
-            Py_DECREF(total_sec);
-            if (PyErr_Occurred()) return NULL;
-            
-            /* Convert to absolute internal timestamp */
-            /* expires_at = internal_now + delta_ms */
-            int64_t delta_ms = (int64_t)(sec * 1000.0);
-            
-            if (delta_ms <= 0) {
-                /* Datetime in past or now = already expired */
-                /* Set to 1 so it's less than any future now_ms */
-                expires_at_ms = 1;
-            } else {
-                expires_at_ms = internal_now + (uint64_t)delta_ms;
-            }
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "ttl must be timedelta or datetime");
-            return NULL;
-        }
+    /* Parse TTL */
+    ttl_result_t ttl = parse_ttl(ttl_obj);
+    if (ttl.error) {
+        return NULL;
     }
     
     int64_t byte_size = py_get_item_size(value);
@@ -303,8 +449,8 @@ PyFlexCache_set(PyFlexCache *self, PyObject *args, PyObject *kwds)
         key, (size_t)key_len,
         value, 0,
         byte_size,
-        ttl_ms,
-        expires_at_ms
+        ttl.ttl_ms,
+        ttl.expires_at_ms
     );
     
     if (rc == -1) {
@@ -431,7 +577,8 @@ PyFlexCache_clear(PyFlexCache *self, PyObject *Py_UNUSED(args))
  * ============================================================ */
 
 static PyMethodDef PyFlexCache_methods[] = {
-    {"set", (PyCFunction)PyFlexCache_set, METH_VARARGS | METH_KEYWORDS, "Set a cache entry"},
+    {"set", (PyCFunction)PyFlexCache_set, METH_VARARGS | METH_KEYWORDS, 
+        "Set a cache entry. ttl can be float (seconds), timedelta, or datetime."},
     {"get", (PyCFunction)PyFlexCache_get, METH_VARARGS, "Get a cache entry"},
     {"delete", (PyCFunction)PyFlexCache_delete, METH_VARARGS, "Delete a cache entry"},
     {"scan", (PyCFunction)PyFlexCache_scan, METH_NOARGS, "Run expiration scan"},

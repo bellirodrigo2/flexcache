@@ -32,6 +32,7 @@ keywords = ["cache", "lru", "fifo", "ttl", "memory"]
 dev = [
     "pytest>=7.0",
     "pytest-benchmark",
+    'pytest-benchmark[histogram]'
 ]
 
 [project.urls]
@@ -40,3 +41,16 @@ Repository = "https://github.com/rodbell/flexcache"
 
 [tool.setuptools]
 packages = ["flexcache"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests", "benchmarks"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "benchmark: marks tests as benchmarks (deselect with '-m \"not benchmark\"')",
+    "unit: marks tests as unit tests (deselect with '-m \"not unit\"')",
+    "slow: marks tests as slow running",
+]
+addopts = "-v --tb=short"

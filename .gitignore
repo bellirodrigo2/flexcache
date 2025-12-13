@@ -60,6 +60,10 @@ coverage.xml
 *.hypothesis/
 htmlcov/
 
+#benchmark results
+benchmark_results/
+.benchmarks/
+
 # Jupyter Notebooks
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/
